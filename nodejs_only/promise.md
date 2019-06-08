@@ -1,17 +1,22 @@
-
-
 # take notes on promise
 
 
 
 >  references 
 >
-> [We have a problem with promises](https://pouchdb.com/2015/05/18/we-have-a-problem-with-promises.html)
+>  [We have a problem with promises](https://pouchdb.com/2015/05/18/we-have-a-problem-with-promises.html)
+>
+>  [handling errors with async/await and promises](<https://medium.com/@vcarl/handling-errors-with-async-await-and-promises-cd2fea534f08>)
+>
+>  [Asynchronous JavaScript: From Callback Hell to Async and Await](https://medium.freecodecamp.org/avoiding-the-async-await-hell-c77a0fb71c4c)
+
+
+
+![alt](https://storage.googleapis.com/converbucket/1552564930881.png)
 
 
 
 
-- ![1552564930881](C:\Users\soul-\drivehkaidan126\~2018秋\learn2018\typora-user-images\1552564930881.png)
 
 
 
@@ -49,7 +54,17 @@ doSomething().then(doSomethingElse);
 
   - so, you should put **function declaration(函數聲明)after then**
 
+- what can we do after `then`
+  
+  - `return` another promise
+  - `return` a synchronous value (or `undefined`)
+  - `throw` a synchronous error
+  
     
+
+
+
+
 
 ```javascript
 // Puzzle #1
@@ -66,7 +81,17 @@ doSomething
 
 ```
 
-- `return doSomethingElse()` will return a promise object 
+- Notice that I'm `return`ing the second promise – that `return` is crucial. If I didn't say `return`, then the `getUserAccountById()` would actually be a *side effect*, and the next function would receive `undefined` instead of the `userAccount`.
+
+> A side effect is any application state change that is observable outside the called function other than its return value. Side effects include:
+>
+> - Modifying any external variable or object property (e.g., a global variable, or a variable in the parent function scope chain)
+> - Logging to the console
+> - Writing to the screen
+> - Writing to a file
+> - Writing to the network
+> - Triggering any external process
+> - Calling any other functions with side-effects
 
 
 
@@ -222,6 +247,111 @@ doSomething()
 
 
 
+#### #1 promise with `forEach` or `loop` and other iteration
+
+```javascript
+// I want to remove() all docs
+db.allDocs({include_docs: true}).then(function (result) {
+  result.rows.forEach(function (row) {
+    db.remove(row.doc);  
+  });
+}).then(function () {
+   // it isn't waiting on anything, and can execute when any number of docs have been removed! 
+  // I naively believe all docs have been removed() now!
+});
+
+
+//the correct way
+db.allDocs({include_docs: true}).then(function (result) {
+  return Promise.all(result.rows.map(function (row) {
+    return db.remove(row.doc);
+  }));
+}).then(function (arrayOfResults) {
+  // All docs have really been removed() now!
+});
+
+```
+
+- wrap all in `Promise.all()`
+- `Promise.all()` return a Promise if every promise in array resolves
+
+- `Promise.all()` also passes an array of results to the next function
+
+
+
+
+
+#### #2 forgetting to add .catch()
+
+
+
+
+
+#### #3 using side effects instead of returning
+
+```javascript
+somePromise().then(function () {
+  someOtherPromise();
+}).then(function () {
+  // Gee, I hope someOtherPromise() has resolved!
+  // Spoiler alert: it hasn't.
+});
+
+//the correct way already explain in #puzzle 1
+```
+
+
+
+#### #4 what if I want the result of two promises?
+
+```js
+getUserByName('nolan').then(function (user) {
+  return getUserAccountById(user.id);
+}).then(function (userAccount) {
+  // dangit, I need the "user" object too!
+});
+```
+
+- 1 is save the intermediate result in a global variable, but it is kludge 
+
+  > A kludge or kluge is a workaround or quick-and-dirty solution that is clumsy, inelegant, inefficient, difficult to extend and hard to maintain
+  >
+  > workaround. 雖不能根本解決, 但能避開問題的替代方法
+
+- 2
+
+  - ```js
+    getUserByName('nolan').then(function (user) {
+      return getUserAccountById(user.id).then(function (userAccount) {
+        // okay, I have both the "user" and the "userAccount"
+      });
+    });
+    ```
+
+
+
+#### #5: promises fall through
+
+```js
+Promise.resolve('foo').then(Promise.resolve('bar')).then(function (result) {
+  console.log(result);
+});
+// it print out foo
+```
+
+- The reason this happens is because when you pass `then()` a non-function (such as a promise), it actually interprets it as `then(null)`, which causes the previous promise's result to fall through. 
+
+- you *can* pass a promise directly into a `then()` method, but it won't do what you think it's doing. `then()` is supposed to take a function, so most likely you meant to do:
+
+  -  ```js
+    Promise.resolve('foo').then(function () {
+      return Promise.resolve('bar');
+    }).then(function (result) {
+      console.log(result);
+    });
+    ```
+
+- practice: always pass a function into `then()`!
 
 
 
@@ -231,4 +361,147 @@ doSomething()
 
 
 
+
+
+### practice
+
+
+
+#### change callback to promise 
+
+```js
+new Promise(function (resolve, reject) {
+  fs.readFile('myfile.txt', function (err, file) {
+    if (err) {
+      return reject(err);
+    }
+    resolve(file);
+  });
+}).then(/* ... */)
+```
+
+
+
+#### always return or throw* from inside a `then()`function
+
+- Unfortunately, there's the inconvenient fact that non-returning functions in JavaScript technically return `undefined`, which means it's easy to accidentally introduce side effects when you meant to return something.
+
+  For this reason, I make it a personal habit to *always return or throw* from inside a `then()`function. I'd recommend you do the same.
+
+
+
+
+
+#### `then(resolveHandler).catch(rejectHandler)`isn't exactly the same as `then(resolveHandler, rejectHandler)`
+
+```js
+//catch(), which is just sugar for then(null, ...)
+                                      
+//I said above that catch() is just sugar. So these two snippets are equivalent:
+
+somePromise().catch(function (err) {
+  // handle error
+});
+
+somePromise().then(null, function (err) {
+  // handle error
+});
+
+//However, that doesn't mean that the following two snippets are equivalent:
+
+somePromise().then(function () {
+  return someOtherPromise();
+}).catch(function (err) {
+  // handle error
+});
+
+somePromise().then(function () {
+  return someOtherPromise();
+}, function (err) {
+  // handle error
+});
+
+
+// consider this code 
+somePromise().then(function () {
+  throw new Error('oh noes');
+}).catch(function (err) {
+  // I caught your error! :)
+});
+
+somePromise().then(function () {
+  throw new Error('oh noes');
+}, function (err) {
+  // I didn't catch your error! :(
+});
+```
+
+- because As it turns out, when you use the `then(resolveHandler, rejectHandler)` format, the `rejectHandler` *won't actually catch an error* if it's thrown by the `resolveHandler` itself.
+- a personal habit to never use the second argument to `then()`, and to always prefer `catch()`.
+
+
+
+
+
+
+
+-------
+
+
+
+### Handling errors with async/await and promises
+
+
+
+#### Regular way
+
+```javascript
+async () => {
+  try {
+    const data = await fetchData();
+    doSomethingComplex(data);
+  } catch (e) {
+    // Any errors thrown by `fetchData` or `doSomethingComplex` are caught.
+  }
+}
+
+//  2 different way of handle Promise 
+() => {
+  fetchData()
+    .then(data => {
+      doSomethingComplex(data);
+    })
+    .catch(err => {
+      // Errors from `fetchData` and `doSomethingComplex` end up here.
+    });
+};
+
+fetchData()
+    .then(
+      data => {
+        doSomethingComplex(data);
+      },
+      err => {
+        // Only errors from `fetchData` are caught.
+      }
+    );
+};
+```
+
+
+
+#### with .catch()
+
+- error handling is relatively self-contained
+- requires you to add a null check on your data
+
+```js
+async () => {
+  const data = await fetchData().catch(e => {
+    // Only errors from `fetchData` are caught.
+  });
+  if (!data) return;
+  doSomethingComplex(data);
+};
+```
 
